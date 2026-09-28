@@ -24,17 +24,13 @@ async function requireUser(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
 
   if (!token) {
-    return res.status(401).json({
-      error: 'Please sign in first'
-    });
+    return res.status(401).json({ error: 'Please sign in first' });
   }
 
   const { data, error } = await supabase.auth.getUser(token);
 
   if (error || !data || !data.user) {
-    return res.status(401).json({
-      error: 'Session expired, please sign in again'
-    });
+    return res.status(401).json({ error: 'Session expired, please sign in again' });
   }
 
   req.user = data.user;
@@ -84,10 +80,7 @@ const SUBSCRIPTION_EVENTS = [
 // ============================================================
 
 async function saveSubscription(userId, fields) {
-  const {
-    data: existing,
-    error: findError
-  } = await supabase
+  const { data: existing, error: findError } = await supabase
     .from('subscriptions')
     .select('user_id')
     .eq('user_id', userId)
@@ -105,10 +98,7 @@ async function saveSubscription(userId, fields) {
   } else {
     const { error } = await supabase
       .from('subscriptions')
-      .insert({
-        user_id: userId,
-        ...fields
-      });
+      .insert({ user_id: userId, ...fields });
 
     if (error) throw error;
   }
@@ -124,14 +114,10 @@ app.post(
   express.raw({ type: '*/*' }),
   async (req, res) => {
     if (!LS_WEBHOOK_SECRET) {
-      return res
-        .status(503)
-        .send('Webhook secret not configured');
+      return res.status(503).send('Webhook secret not configured');
     }
 
-    const signature = String(
-      req.headers['x-signature'] || ''
-    );
+    const signature = String(req.headers['x-signature'] || '');
 
     const digest = crypto
       .createHmac('sha256', LS_WEBHOOK_SECRET)
@@ -140,10 +126,7 @@ app.post(
 
     const valid =
       signature.length === digest.length &&
-      crypto.timingSafeEqual(
-        Buffer.from(digest),
-        Buffer.from(signature)
-      );
+      crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
 
     if (!valid) {
       console.error('Webhook signature check failed');
@@ -151,21 +134,15 @@ app.post(
     }
 
     try {
-      const payload = JSON.parse(
-        req.body.toString('utf8')
-      );
+      const payload = JSON.parse(req.body.toString('utf8'));
 
-      const eventName =
-        payload.meta && payload.meta.event_name;
+      const eventName = payload.meta && payload.meta.event_name;
 
       if (!SUBSCRIPTION_EVENTS.includes(eventName)) {
-        return res.json({
-          received: true
-        });
+        return res.json({ received: true });
       }
 
-      const custom =
-        (payload.meta && payload.meta.custom_data) || {};
+      const custom = (payload.meta && payload.meta.custom_data) || {};
 
       const sub = payload.data;
       const attrs = sub.attributes || {};
@@ -177,68 +154,36 @@ app.post(
         const { data: row } = await supabase
           .from('subscriptions')
           .select('user_id')
-          .eq(
-            'stripe_subscription_id',
-            subscriptionId
-          )
+          .eq('stripe_subscription_id', subscriptionId)
           .maybeSingle();
 
         userId = row && row.user_id;
       }
 
       if (!userId) {
-        console.error(
-          'Webhook: could not work out which user this belongs to'
-        );
-
-        return res.json({
-          received: true
-        });
+        console.error('Webhook: could not work out which user this belongs to');
+        return res.json({ received: true });
       }
 
       const fields = {
-        status:
-          STATUS_MAP[attrs.status] || 'inactive',
-
-        stripe_customer_id:
-          attrs.customer_id
-            ? String(attrs.customer_id)
-            : null,
-
-        stripe_subscription_id:
-          subscriptionId,
-
-        current_period_end:
-          attrs.ends_at ||
-          attrs.renews_at ||
-          null,
-
-        updated_at:
-          new Date().toISOString()
+        status: STATUS_MAP[attrs.status] || 'inactive',
+        stripe_customer_id: attrs.customer_id ? String(attrs.customer_id) : null,
+        stripe_subscription_id: subscriptionId,
+        current_period_end: attrs.ends_at || attrs.renews_at || null,
+        updated_at: new Date().toISOString()
       };
 
       if (custom.plan) {
         fields.plan = custom.plan;
       }
 
-      await saveSubscription(
-        userId,
-        fields
-      );
+      await saveSubscription(userId, fields);
 
-      res.json({
-        received: true
-      });
+      res.json({ received: true });
 
     } catch (err) {
-      console.error(
-        'Webhook handling error:',
-        err
-      );
-
-      res
-        .status(500)
-        .send('Webhook handler failed');
+      console.error('Webhook handling error:', err);
+      res.status(500).send('Webhook handler failed');
     }
   }
 );
@@ -256,9 +201,7 @@ app.use(express.json());
 // ============================================================
 
 app.get('/api/health', (req, res) => {
-  res.json({
-    ok: true
-  });
+  res.json({ ok: true });
 });
 
 
@@ -272,114 +215,76 @@ app.post(
   async (req, res) => {
     try {
       if (!LS_API_KEY || !LS_STORE_ID) {
-        return res.status(503).json({
-          error: 'Payments are not set up yet'
-        });
+        return res.status(503).json({ error: 'Payments are not set up yet' });
       }
 
-      const {
-        plan,
-        billing
-      } = req.body;
+      const { plan, billing } = req.body;
 
       const userId = req.user.id;
 
-      const variantId =
-        VARIANT_IDS[
-          `${plan}_${billing}`
-        ];
+      const variantId = VARIANT_IDS[`${plan}_${billing}`];
 
       if (!variantId) {
-        return res.status(400).json({
-          error:
-            'Unknown plan or billing cycle'
-        });
+        return res.status(400).json({ error: 'Unknown plan or billing cycle' });
       }
 
-      const response = await fetch(
-        `${LS_API}/checkouts`,
-        {
-          method: 'POST',
+      const response = await fetch(`${LS_API}/checkouts`, {
+        method: 'POST',
 
-          headers: {
-            Accept:
-              'application/vnd.api+json',
+        headers: {
+          Accept: 'application/vnd.api+json',
+          'Content-Type': 'application/vnd.api+json',
+          Authorization: `Bearer ${LS_API_KEY}`
+        },
 
-            'Content-Type':
-              'application/vnd.api+json',
+        body: JSON.stringify({
+          data: {
+            type: 'checkouts',
 
-            Authorization:
-              `Bearer ${LS_API_KEY}`
-          },
-
-          body: JSON.stringify({
-            data: {
-              type: 'checkouts',
-
-              attributes: {
-                checkout_data: {
-                  custom: {
-                    user_id: userId,
-                    plan
-                  }
-                },
-
-                product_options: {
-                  redirect_url:
-                    process.env.CLIENT_SUCCESS_URL
+            attributes: {
+              checkout_data: {
+                custom: {
+                  user_id: userId,
+                  plan
                 }
               },
 
-              relationships: {
-                store: {
-                  data: {
-                    type: 'stores',
-                    id: String(LS_STORE_ID)
-                  }
-                },
+              product_options: {
+                redirect_url: process.env.CLIENT_SUCCESS_URL
+              }
+            },
 
-                variant: {
-                  data: {
-                    type: 'variants',
-                    id: String(variantId)
-                  }
+            relationships: {
+              store: {
+                data: {
+                  type: 'stores',
+                  id: String(LS_STORE_ID)
+                }
+              },
+
+              variant: {
+                data: {
+                  type: 'variants',
+                  id: String(variantId)
                 }
               }
             }
-          })
-        }
-      );
+          }
+        })
+      });
 
-      const json =
-        await response.json();
+      const json = await response.json();
 
       if (!response.ok) {
-        console.error(
-          'LemonSqueezy checkout error:',
-          JSON.stringify(json)
-        );
-
-        return res.status(502).json({
-          error:
-            'Could not start checkout'
-        });
+        console.error('LemonSqueezy checkout error:', JSON.stringify(json));
+        return res.status(502).json({ error: 'Could not start checkout' });
       }
 
-      res.json({
-        url:
-          json.data.attributes.url
-      });
+      res.json({ url: json.data.attributes.url });
 
     } catch (err) {
-      console.error(
-        'Checkout error:',
-        err
-      );
-
-      res.status(500).json({
-        error:
-          'Could not start checkout'
-      });
+      console.error('Checkout error:', err);
+      res.status(500).json({ error: 'Could not start checkout' });
     }
   }
 );
@@ -394,39 +299,21 @@ app.get(
   requireUser,
   async (req, res) => {
 
-    if (
-      req.params.userId !==
-      req.user.id
-    ) {
-      return res.status(403).json({
-        error: 'Not allowed'
-      });
+    if (req.params.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Not allowed' });
     }
 
-    const {
-      data,
-      error
-    } = await supabase
+    const { data, error } = await supabase
       .from('subscriptions')
       .select('*')
-      .eq(
-        'user_id',
-        req.params.userId
-      )
+      .eq('user_id', req.params.userId)
       .maybeSingle();
 
     if (error) {
-      return res.status(500).json({
-        error: error.message
-      });
+      return res.status(500).json({ error: error.message });
     }
 
-    res.json(
-      data || {
-        plan: 'free',
-        status: 'inactive'
-      }
-    );
+    res.json(data || { plan: 'free', status: 'inactive' });
   }
 );
 
@@ -435,16 +322,9 @@ app.get(
 // FEEDBACK SYSTEM
 // ============================================================
 
-// Expected body:
-//
-// {
-//   name: "User Name",
-//   email: "user@example.com",
-//   type: "General",
-//   rating: 5,
-//   message: "Your detailed feedback",
-//   consent: true
-// }
+// The website form sends: name, email, category, rating, message, website
+// (older clients may send "type" instead of "category").
+// Rating 0 means the visitor did not pick any stars.
 
 app.post(
   '/api/feedback',
@@ -452,115 +332,52 @@ app.post(
 
     try {
 
-      const name =
-        String(
-          req.body.name || ''
-        ).trim();
+      const name = String(req.body.name || '').trim();
 
-      const email =
-        String(
-          req.body.email || ''
-        )
-        .trim()
-        .toLowerCase();
+      const email = String(req.body.email || '').trim().toLowerCase();
 
-      const type =
-        String(
-          req.body.type ||
-          'General'
-        ).trim();
+      const type = String(
+        req.body.type || req.body.category || 'General'
+      ).trim();
 
-      const rating =
-        Number(
-          req.body.rating
-        );
+      const rating = Number(req.body.rating || 0);
 
-      const message =
-        String(
-          req.body.message || ''
-        ).trim();
+      const message = String(req.body.message || '').trim();
 
-      const consent =
-        Boolean(
-          req.body.consent
-        );
+      // The form already requires the consent checkbox before sending.
+      const consent = true;
 
 
-      // -------------------------
       // NAME VALIDATION
-      // -------------------------
-
-      if (
-        name.length < 2 ||
-        name.length > 100
-      ) {
-        return res.status(400).json({
-          error:
-            'Please enter a valid name'
-        });
+      if (name.length < 2 || name.length > 100) {
+        return res.status(400).json({ error: 'Please enter a valid name' });
       }
 
-
-      // -------------------------
       // EMAIL VALIDATION
-      // -------------------------
-
-      if (
-        email &&
-        !/^\S+@\S+\.\S+$/.test(email)
-      ) {
-        return res.status(400).json({
-          error:
-            'Please enter a valid email address'
-        });
+      if (email && !/^\S+@\S+\.\S+$/.test(email)) {
+        return res.status(400).json({ error: 'Please enter a valid email address' });
       }
 
-
-      // -------------------------
-      // RATING VALIDATION
-      // -------------------------
-
-      if (
-        !Number.isInteger(rating) ||
-        rating < 1 ||
-        rating > 5
-      ) {
-        return res.status(400).json({
-          error:
-            'Rating must be between 1 and 5'
-        });
+      // RATING VALIDATION (0 = no rating, otherwise 1-5)
+      if (!Number.isInteger(rating) || rating < 0 || rating > 5) {
+        return res.status(400).json({ error: 'Rating must be between 1 and 5' });
       }
 
-
-      // -------------------------
       // MESSAGE VALIDATION
-      // -------------------------
-
-      if (
-        message.length < 5 ||
-        message.length > 5000
-      ) {
+      if (message.length < 5 || message.length > 5000) {
         return res.status(400).json({
-          error:
-            'Feedback must be between 5 and 5000 characters'
+          error: 'Feedback must be between 5 and 5000 characters'
         });
       }
 
 
-      // -------------------------
       // SAVE TO SUPABASE
-      // -------------------------
-
-      const {
-        data,
-        error
-      } = await supabase
+      const { data, error } = await supabase
         .from('feedback')
         .insert({
           name,
           email: email || null,
-          type:
-            type || 'General',
+          type: type || 'General',
           rating,
           message,
           consent
@@ -569,51 +386,46 @@ app.post(
         .single();
 
 
-      // -------------------------
       // DATABASE ERROR
-      // -------------------------
-
       if (error) {
-
-        console.error(
-          'Feedback save error:',
-          error
-        );
-
-        return res.status(500).json({
-          error:
-            'Could not save feedback'
-        });
+        console.error('Feedback save error:', error);
+        return res.status(500).json({ error: 'Could not save feedback' });
       }
 
 
-      // -------------------------
       // SUCCESS
-      // -------------------------
-
       res.status(201).json({
         success: true,
-
-        message:
-          'Thank you for your feedback!',
-
+        message: 'Thank you for your feedback!',
         feedback: data
       });
 
     } catch (err) {
 
-      console.error(
-        'Feedback error:',
-        err
-      );
+      console.error('Feedback error:', err);
 
-      res.status(500).json({
-        error:
-          'Could not submit feedback'
-      });
+      res.status(500).json({ error: 'Could not submit feedback' });
     }
   }
 );
+
+
+// Public list of feedback (never returns email addresses)
+app.get('/api/feedback', async (req, res) => {
+  const { data, error } = await supabase
+    .from('feedback')
+    .select('name, rating, message, type, created_at')
+    .eq('consent', true)
+    .order('created_at', { ascending: false })
+    .limit(30);
+
+  if (error) {
+    console.error('Feedback list error:', error);
+    return res.status(500).json({ error: 'Could not load feedback' });
+  }
+
+  res.json(data || []);
+});
 
 
 // ============================================================
@@ -625,28 +437,15 @@ app.post(
   requireUser,
   async (req, res) => {
 
-    const {
-      text,
-      mood,
-      typography,
-      background,
-      voice
-    } = req.body;
+    const { text, mood, typography, background, voice } = req.body;
 
-    const userId =
-      req.user.id;
+    const userId = req.user.id;
 
     if (!text) {
-      return res.status(400).json({
-        error:
-          'text is required'
-      });
+      return res.status(400).json({ error: 'text is required' });
     }
 
-    const {
-      data,
-      error
-    } = await supabase
+    const { data, error } = await supabase
       .from('projects')
       .insert({
         user_id: userId,
@@ -660,10 +459,7 @@ app.post(
       .single();
 
     if (error) {
-      return res.status(500).json({
-        error:
-          error.message
-      });
+      return res.status(500).json({ error: error.message });
     }
 
     res.json(data);
@@ -680,38 +476,18 @@ app.get(
   requireUser,
   async (req, res) => {
 
-    if (
-      req.params.userId !==
-      req.user.id
-    ) {
-      return res.status(403).json({
-        error:
-          'Not allowed'
-      });
+    if (req.params.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Not allowed' });
     }
 
-    const {
-      data,
-      error
-    } = await supabase
+    const { data, error } = await supabase
       .from('projects')
       .select('*')
-      .eq(
-        'user_id',
-        req.params.userId
-      )
-      .order(
-        'created_at',
-        {
-          ascending: false
-        }
-      );
+      .eq('user_id', req.params.userId)
+      .order('created_at', { ascending: false });
 
     if (error) {
-      return res.status(500).json({
-        error:
-          error.message
-      });
+      return res.status(500).json({ error: error.message });
     }
 
     res.json(data);
@@ -728,30 +504,17 @@ app.delete(
   requireUser,
   async (req, res) => {
 
-    const {
-      error
-    } = await supabase
+    const { error } = await supabase
       .from('projects')
       .delete()
-      .eq(
-        'id',
-        req.params.id
-      )
-      .eq(
-        'user_id',
-        req.user.id
-      );
+      .eq('id', req.params.id)
+      .eq('user_id', req.user.id);
 
     if (error) {
-      return res.status(500).json({
-        error:
-          error.message
-      });
+      return res.status(500).json({ error: error.message });
     }
 
-    res.json({
-      deleted: true
-    });
+    res.json({ deleted: true });
   }
 );
 
@@ -760,13 +523,8 @@ app.delete(
 // START SERVER
 // ============================================================
 
-const port =
-  process.env.PORT || 4000;
+const port = process.env.PORT || 4000;
 
-app.listen(
-  port,
-  () =>
-    console.log(
-      `Navaar backend running on port ${port}`
-    )
+app.listen(port, () =>
+  console.log(`Navaar backend running on port ${port}`)
 );
