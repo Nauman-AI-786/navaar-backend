@@ -194,11 +194,51 @@ app.get('/api/subscription/:userId', requireUser, async (req, res) => {
   res.json(data || { plan: 'free', status: 'inactive' });
 });
 
+// Saved-project limit for each plan (null = unlimited). Keep in step with the pricing section on the website.
+const PROJECT_LIMITS = { free: 5, creator: 100, studio: null };
+
+// A user only gets their paid plan while the subscription is active; otherwise they are on Free.
+async function getUserPlan(userId) {
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('plan, status')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (data && data.status === 'active' && Object.prototype.hasOwnProperty.call(PROJECT_LIMITS, data.plan)) {
+    return data.plan;
+  }
+  return 'free';
+}
+
 // Save a project (poetry/lyrics + style choices)
 app.post('/api/projects', requireUser, async (req, res) => {
   const { text, mood, typography, background, voice } = req.body;
   const userId = req.user.id;
   if (!text) return res.status(400).json({ error: 'text is required' });
+
+  try {
+    const plan = await getUserPlan(userId);
+    const limit = PROJECT_LIMITS[plan];
+    if (limit !== null) {
+      const { count, error: countError } = await supabase
+        .from('projects')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId);
+      if (countError) throw countError;
+      if (count >= limit) {
+        return res.status(403).json({
+          error: `Your ${plan} plan allows up to ${limit} saved projects. Delete one or upgrade to save more.`,
+          code: 'project_limit_reached',
+          plan,
+          limit,
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Project limit check error:', err);
+    return res.status(500).json({ error: 'Could not save the project right now' });
+  }
 
   const { data, error } = await supabase
     .from('projects')
