@@ -35,3 +35,29 @@ alter table subscriptions enable row level security;
 create policy "Users can read their own subscription"
   on subscriptions for select
   using (auth.uid() = user_id);
+
+-- Visitor feedback. Public visitors may INSERT feedback, but public SELECT is not allowed.
+create table if not exists feedback (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete set null,
+  name text not null,
+  email text,
+  category text not null default 'general',
+  rating integer,
+  message text not null,
+  created_at timestamptz default now()
+);
+
+alter table feedback enable row level security;
+
+drop policy if exists "Anyone can submit feedback" on feedback;
+create policy "Anyone can submit feedback"
+  on feedback for insert
+  to anon, authenticated
+  with check (
+    char_length(name) between 2 and 80
+    and char_length(message) between 10 and 2000
+    and (rating is null or rating between 1 and 5)
+  );
+
+-- No SELECT policy is intentionally created here, so visitor feedback is not publicly readable.
