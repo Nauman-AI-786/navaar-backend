@@ -1,7 +1,7 @@
 {
   "name": "navaar-backend",
-  "version": "1.1.0",
-  "description": "Backend for Navaar Studio: saved projects (Supabase) and LemonSqueezy subscriptions",
+  "version": "1.0.0",
+  "description": "Backend for Navaar Studio — saved projects (Supabase) and LemonSqueezy checkout",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,7 +10,8 @@
     "@supabase/supabase-js": "^2.45.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "stripe": "^16.8.0"
   },
   "engines": {
     "node": ">=22.0.0"
