@@ -7,7 +7,21 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 app.use(cors());
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+// Checks the login token sent by the browser and works out who the caller really is.
+// Every route below that touches user data uses req.user.id, never an id sent in the request.
+async function requireUser(req, res, next) {
+  const header = String(req.headers.authorization || '');
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token) return res.status(401).json({ error: 'Please sign in first' });
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data || !data.user) return res.status(401).json({ error: 'Session expired, please sign in again' });
+  req.user = data.user;
+  next();
+}
 
 const LS_API = 'https://api.lemonsqueezy.com/v1';
 const LS_API_KEY = process.env.LEMONSQUEEZY_API_KEY;
@@ -122,16 +136,16 @@ app.use(express.json());
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // Create a LemonSqueezy checkout for a given plan
-// body: { plan: 'creator'|'studio', billing: 'monthly'|'annual', userId: string }
-app.post('/api/checkout', async (req, res) => {
+// body: { plan: 'creator'|'studio', billing: 'monthly'|'annual' }  (user comes from the login token)
+app.post('/api/checkout', requireUser, async (req, res) => {
   try {
     if (!LS_API_KEY || !LS_STORE_ID) {
       return res.status(503).json({ error: 'Payments are not set up yet' });
     }
-    const { plan, billing, userId } = req.body;
+    const { plan, billing } = req.body;
+    const userId = req.user.id;
     const variantId = VARIANT_IDS[`${plan}_${billing}`];
     if (!variantId) return res.status(400).json({ error: 'Unknown plan or billing cycle' });
-    if (!userId) return res.status(400).json({ error: 'userId is required' });
 
     const response = await fetch(`${LS_API}/checkouts`, {
       method: 'POST',
@@ -168,7 +182,8 @@ app.post('/api/checkout', async (req, res) => {
 });
 
 // Get the caller's current plan/status
-app.get('/api/subscription/:userId', async (req, res) => {
+app.get('/api/subscription/:userId', requireUser, async (req, res) => {
+  if (req.params.userId !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
   const { data, error } = await supabase
     .from('subscriptions')
     .select('*')
@@ -180,9 +195,10 @@ app.get('/api/subscription/:userId', async (req, res) => {
 });
 
 // Save a project (poetry/lyrics + style choices)
-app.post('/api/projects', async (req, res) => {
-  const { userId, text, mood, typography, background, voice } = req.body;
-  if (!userId || !text) return res.status(400).json({ error: 'userId and text are required' });
+app.post('/api/projects', requireUser, async (req, res) => {
+  const { text, mood, typography, background, voice } = req.body;
+  const userId = req.user.id;
+  if (!text) return res.status(400).json({ error: 'text is required' });
 
   const { data, error } = await supabase
     .from('projects')
@@ -195,7 +211,8 @@ app.post('/api/projects', async (req, res) => {
 });
 
 // List a user's saved projects
-app.get('/api/projects/:userId', async (req, res) => {
+app.get('/api/projects/:userId', requireUser, async (req, res) => {
+  if (req.params.userId !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
   const { data, error } = await supabase
     .from('projects')
     .select('*')
@@ -207,8 +224,8 @@ app.get('/api/projects/:userId', async (req, res) => {
 });
 
 // Delete a saved project
-app.delete('/api/projects/:id', async (req, res) => {
-  const { error } = await supabase.from('projects').delete().eq('id', req.params.id);
+app.delete('/api/projects/:id', requireUser, async (req, res) => {
+  const { error } = await supabase.from('projects').delete().eq('id', req.params.id).eq('user_id', req.user.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ deleted: true });
 });
