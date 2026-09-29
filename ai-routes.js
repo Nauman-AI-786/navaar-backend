@@ -82,7 +82,11 @@ router.post('/cartoon', express.json({ limit: '6mb' }), async (req, res) => {
     });
     if (!r.ok) {
       cartoonHits.set(user.id, list.slice(0, -1)); // failed, don't count it
-      return res.status(r.status === 429 ? 429 : 502).json({ error: 'Cartoon service is busy. Try again later.' });
+      const errText = (await r.text().catch(() => '')).slice(0, 400);
+      console.error('Cloudflare cartoon error', r.status, errText); // see Railway Logs
+      let hint = 'Cartoon service error (code ' + r.status + ').';
+      try { const j = JSON.parse(errText); if (j.errors && j.errors[0]) hint += ' ' + String(j.errors[0].message).slice(0, 160); } catch (e) {}
+      return res.status(r.status === 429 ? 429 : 502).json({ error: hint });
     }
     const buf = Buffer.from(await r.arrayBuffer());
     res.json({ image: 'data:image/png;base64,' + buf.toString('base64') });
