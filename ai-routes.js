@@ -1,5 +1,5 @@
 // Railway backend: add to your Express app -> app.use('/api/ai', require('./ai-routes'));
-// Env vars on Railway: ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
+// Env vars on Railway: GEMINI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
 const express = require('express');
 const router = express.Router();
 const hits = new Map(); // simple per-user rate limit: 10 requests / hour
@@ -24,17 +24,18 @@ router.post('/poetry', async (req, res) => {
     const topic = String(req.body.topic || '').slice(0, 80);
     if (topic.length < 2) return res.status(400).json({ error: 'Topic required.' });
 
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
       body: JSON.stringify({
-        model: 'claude-sonnet-5-5', max_tokens: 300,
-        system: 'You write short original poetry for videos. Reply with ONLY 3 to 4 short lines, one per line, no title, no numbering, no quotes. Write in the same language and script as the topic (Urdu topic = Urdu script).',
-        messages: [{ role: 'user', content: 'Topic: ' + topic }]
+        systemInstruction: { parts: [{ text: 'You write short original poetry for videos. Reply with ONLY 3 to 4 short lines, one per line, no title, no numbering, no quotes. Write in the same language and script as the topic (Urdu topic = Urdu script).' }] },
+        contents: [{ role: 'user', parts: [{ text: 'Topic: ' + topic }] }],
+        generationConfig: { maxOutputTokens: 300 }
       })
     });
     const d = await r.json();
-    const text = d.content && d.content[0] && d.content[0].text;
+    const text = d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts && d.candidates[0].content.parts[0].text;
     if (!text) return res.status(502).json({ error: 'AI did not return text.' });
     res.json({ text: text.trim() });
   } catch (e) { res.status(500).json({ error: 'AI service error.' }); }
