@@ -41,7 +41,7 @@ router.post('/poetry', async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'AI service error.' }); }
 });
 
-// ---- Photo -> Cartoon (Cloudflare Workers AI, free daily allowance) ----
+// ---- Photo -> Cartoon (Cloudflare Workers AI FLUX.2 klein, free daily allowance) ----
 const cartoonHits = new Map(); // 5 cartoons / hour / user
 const STYLES = {
   cartoon: 'cartoon illustration, bold outlines, flat vibrant colors, clean shading',
@@ -66,30 +66,35 @@ router.post('/cartoon', express.json({ limit: '6mb' }), async (req, res) => {
 
     list.push(now); cartoonHits.set(user.id, list);
 
+    // FLUX.2 klein 4B on Workers AI: image editing, takes multipart form data
     const url = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID +
-      '/ai/run/@cf/runwayml/stable-diffusion-v1-5-img2img';
+      '/ai/run/@cf/black-forest-labs/flux-2-klein-4b';
+    const form = new FormData();
+    form.append('prompt', 'Turn the photo in image 0 into a ' + style +
+      '. Keep the same face, hairstyle, clothes and pose. No text, no watermark.');
+    form.append('input_image_0', new Blob([Buffer.from(img, 'base64')], { type: 'image/jpeg' }), 'photo.jpg');
+
     const r = await fetch(url, {
       method: 'POST',
-      headers: { Authorization: 'Bearer ' + process.env.CF_API_TOKEN, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        prompt: style + ', same person, same pose',
-        negative_prompt: 'blurry, deformed, extra fingers, text, watermark',
-        image_b64: img,
-        strength: 0.6,
-        guidance: 7.5,
-        num_steps: 20
-      })
+      headers: { Authorization: 'Bearer ' + process.env.CF_API_TOKEN }, // fetch sets the multipart boundary itself
+      body: form
     });
+    const raw = await r.text().catch(() => '');
     if (!r.ok) {
       cartoonHits.set(user.id, list.slice(0, -1)); // failed, don't count it
-      const errText = (await r.text().catch(() => '')).slice(0, 400);
-      console.error('Cloudflare cartoon error', r.status, errText); // see Railway Logs
+      console.error('Cloudflare cartoon error', r.status, raw.slice(0, 400)); // see Railway Logs
       let hint = 'Cartoon service error (code ' + r.status + ').';
-      try { const j = JSON.parse(errText); if (j.errors && j.errors[0]) hint += ' ' + String(j.errors[0].message).slice(0, 160); } catch (e) {}
+      try { const j = JSON.parse(raw); if (j.errors && j.errors[0]) hint += ' ' + String(j.errors[0].message).slice(0, 160); } catch (e) {}
       return res.status(r.status === 429 ? 429 : 502).json({ error: hint });
     }
-    const buf = Buffer.from(await r.arrayBuffer());
-    res.json({ image: 'data:image/png;base64,' + buf.toString('base64') });
+    let b64 = '';
+    try { const j = JSON.parse(raw); b64 = (j.result && j.result.image) || j.image || ''; } catch (e) {}
+    if (!b64) {
+      cartoonHits.set(user.id, list.slice(0, -1));
+      console.error('Cloudflare cartoon: no image in response', raw.slice(0, 300));
+      return res.status(502).json({ error: 'Cartoon service returned no image.' });
+    }
+    res.json({ image: 'data:image/jpeg;base64,' + b64 });
   } catch (e) { res.status(500).json({ error: 'Cartoon service error.' }); }
 });
 
