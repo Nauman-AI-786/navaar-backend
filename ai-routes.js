@@ -47,7 +47,8 @@ const STYLES = {
   cartoon: 'classic 2D cartoon illustration with bold clean outlines, flat vibrant colors and simple cel shading',
   anime: 'anime illustration with clean line art, soft cel shading, large expressive eyes and vibrant colors',
   pixar: '3D animated movie character in Pixar style, smooth skin, big expressive eyes, soft studio lighting',
-  sketch: 'detailed pencil sketch portrait with clean line art and light hatching shading, black and white'
+  sketch: 'detailed pencil sketch portrait with clean line art and light hatching shading, black and white',
+  retro80s: 'RETRO'
 };
 
 router.post('/cartoon', express.json({ limit: '6mb' }), async (req, res) => {
@@ -70,9 +71,14 @@ router.post('/cartoon', express.json({ limit: '6mb' }), async (req, res) => {
     const url = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID +
       '/ai/run/@cf/black-forest-labs/flux-2-klein-4b';
     const form = new FormData();
-    form.append('prompt', 'Redraw image 0 as a ' + style +
-      '. Keep the exact same face shape, facial features, expression, hairstyle, skin tone, clothing, pose and background composition as in image 0. ' +
-      'The person must stay clearly recognizable. No text, no watermark, no extra people.');
+    const prompt = style === 'RETRO'
+      ? 'Redraw image 0 as an authentic vintage 1980s color film photograph of the same person standing on a busy city street with old cars and shop signs in the background. ' +
+        'Keep the exact same face, facial features, expression, hairstyle and beard. Dress him in a period-correct 1980s tweed suit with a paisley tie. ' +
+        'Warm faded Kodak film colors, film grain, light scratches and dust, slightly worn aged print. No text overlays, no watermark.'
+      : 'Redraw image 0 as a ' + style +
+        '. Keep the exact same face shape, facial features, expression, hairstyle, skin tone, clothing, pose and background composition as in image 0. ' +
+        'The person must stay clearly recognizable. No text, no watermark, no extra people.';
+    form.append('prompt', prompt);
     form.append('input_image_0', new Blob([Buffer.from(img, 'base64')], { type: 'image/jpeg' }), 'photo.jpg');
 
     const r = await fetch(url, {
