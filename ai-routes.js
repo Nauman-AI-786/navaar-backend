@@ -1,5 +1,5 @@
 // Railway backend: add to your Express app -> app.use('/api/ai', require('./ai-routes'));
-// Env vars on Railway: GEMINI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
+// Env vars on Railway: GEMINI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY, CF_ACCOUNT_ID, CF_API_TOKEN
 const express = require('express');
 const router = express.Router();
 const hits = new Map(); // simple per-user rate limit: 10 requests / hour
@@ -39,6 +39,54 @@ router.post('/poetry', async (req, res) => {
     if (!text) return res.status(502).json({ error: 'AI did not return text.' });
     res.json({ text: text.trim() });
   } catch (e) { res.status(500).json({ error: 'AI service error.' }); }
+});
+
+// ---- Photo -> Cartoon (Cloudflare Workers AI, free daily allowance) ----
+const cartoonHits = new Map(); // 5 cartoons / hour / user
+const STYLES = {
+  cartoon: 'cartoon illustration, bold outlines, flat vibrant colors, clean shading',
+  anime: 'anime style portrait, soft cel shading, big expressive eyes, vibrant colors',
+  pixar: '3d pixar style cartoon character, smooth skin, soft lighting, colorful',
+  sketch: 'pencil sketch drawing, detailed line art, black and white'
+};
+
+router.post('/cartoon', express.json({ limit: '6mb' }), async (req, res) => {
+  try {
+    const user = await getUser(req);
+    if (!user) return res.status(401).json({ error: 'Please sign in.' });
+    if (!process.env.CF_ACCOUNT_ID || !process.env.CF_API_TOKEN)
+      return res.status(503).json({ error: 'Cartoon service is not connected yet.' });
+
+    const now = Date.now(), list = (cartoonHits.get(user.id) || []).filter(t => now - t < 3600e3);
+    if (list.length >= 5) return res.status(429).json({ error: 'Hourly cartoon limit reached. Try later.' });
+
+    let img = String(req.body.image || '').replace(/^data:image\/\w+;base64,/, '');
+    if (img.length < 100 || img.length > 5.5e6) return res.status(400).json({ error: 'Send a smaller photo.' });
+    const style = STYLES[req.body.style] || STYLES.cartoon;
+
+    list.push(now); cartoonHits.set(user.id, list);
+
+    const url = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID +
+      '/ai/run/@cf/runwayml/stable-diffusion-v1-5-img2img';
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + process.env.CF_API_TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        prompt: style + ', same person, same pose',
+        negative_prompt: 'blurry, deformed, extra fingers, text, watermark',
+        image_b64: img,
+        strength: 0.6,
+        guidance: 7.5,
+        num_steps: 20
+      })
+    });
+    if (!r.ok) {
+      cartoonHits.set(user.id, list.slice(0, -1)); // failed, don't count it
+      return res.status(r.status === 429 ? 429 : 502).json({ error: 'Cartoon service is busy. Try again later.' });
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.json({ image: 'data:image/png;base64,' + buf.toString('base64') });
+  } catch (e) { res.status(500).json({ error: 'Cartoon service error.' }); }
 });
 
 module.exports = router;
