@@ -34,9 +34,18 @@ router.post('/poetry', async (req, res) => {
         generationConfig: { maxOutputTokens: 300 }
       })
     });
-    const d = await r.json();
-    const text = d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts && d.candidates[0].content.parts[0].text;
-    if (!text) return res.status(502).json({ error: 'AI did not return text.' });
+    const d = await r.json().catch(() => ({}));
+if (!r.ok || d.error) {
+  console.error('Gemini error', r.status, JSON.stringify(d).slice(0, 500));
+  const msg = (d.error && d.error.message) ? String(d.error.message).slice(0, 160) : 'code ' + r.status;
+  return res.status(502).json({ error: 'AI error: ' + msg });
+}
+const parts = (d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts) || [];
+const text = parts.map(p => p.text || '').join('').trim();
+if (!text) {
+  console.error('Gemini empty', JSON.stringify(d).slice(0, 500));
+  return res.status(502).json({ error: 'AI did not return text.' });
+}
     res.json({ text: text.trim() });
   } catch (e) { res.status(500).json({ error: 'AI service error.' }); }
 });
